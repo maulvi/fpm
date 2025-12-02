@@ -26,29 +26,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Build local untuk test
-      - name: Build test image
-        run: |
-          docker build -t test-image:latest .
-
-      # Test
-      - name: Test image
-        run: |
-          echo "=== Testing PHP Version ==="
-          docker run --rm test-image:latest php -v
-          
-          echo "=== Testing Extensions ==="
-          docker run --rm test-image:latest php -m | grep -E "(mysqli|opcache|redis|gd)"
-          
-          echo "=== Testing Composer ==="
-          docker run --rm test-image:latest composer --version
-
       # Build dan Push (TANPA kondisi if)
       - name: Build and push to Docker Hub
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:latest
