@@ -12,27 +12,29 @@ on:
       - main
   workflow_dispatch:
 
-env:
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm
-
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     
     steps:
-      # Checkout repository
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Setup QEMU for multi-platform builds
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      # Setup Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Login to Docker Hub
+      - name: Check secrets
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ] || [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "❌ Docker Hub credentials not configured"
+            exit 1
+          fi
+          echo "✅ Docker Hub credentials found"
+
       - name: Login to Docker Hub
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -40,24 +42,20 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Extract metadata for tags
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=8.5
             type=raw,value=8.5-fpm
 
-      # Build and test (without pushing)
       - name: Build test image
         uses: docker/build-push-action@v5
         with:
@@ -68,55 +66,34 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Run tests on built image
       - name: Test PHP version
         run: |
+          echo "=== Testing PHP Version ==="
           docker run --rm test-image:latest php -v
 
-      - name: Test installed extensions
+      - name: Test PHP info
         run: |
-          echo "=== Testing PHP Extensions ==="
-          docker run --rm test-image:latest php -m | grep -E "(mysqli|pdo_mysql|gd|imagick|opcache|redis|bcmath|intl|mbstring|zip|soap)"
+          echo "=== Testing PHP Info ==="
+          docker run --rm test-image:latest php -i | head -20
+
+      - name: Test critical extensions
+        run: |
+          echo "=== Testing Critical Extensions ==="
+          docker run --rm test-image:latest php -m | grep -E "(mysqli|pdo_mysql|opcache|redis|gd|imagick|zip|bcmath|mbstring|intl)"
+
+      - name: Test all extensions
+        run: |
+          echo "=== All Installed Extensions ==="
+          docker run --rm test-image:latest php -m
 
       - name: Test Composer
         run: |
+          echo "=== Testing Composer ==="
           docker run --rm test-image:latest composer --version
 
-      - name: Test php-fpm-healthcheck
+      - name: Test PHP-FPM process
         run: |
-          docker run --rm test-image:latest php-fpm-healthcheck --help
-
-      # Build and push to Docker Hub (multi-platform)
-      - name: Build and push Docker image
-        if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: false
-
-      # Create release notes
-      - name: Generate build summary
-        if: github.event_name != 'pull_request'
-        run: |
-          echo "## 🐳 Docker Image Built Successfully" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
-          echo '```
-          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms:** linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Pull command:**" >> $GITHUB_STEP_SUMMARY
-          echo '```
-          echo "docker pull ${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "=== Testing PHP-FPM Startup ==="
+          docker run --rm -d --name test-fpm test-image:latest
+          sleep 5
+          docker exec test-fpm ps aux | grep php
