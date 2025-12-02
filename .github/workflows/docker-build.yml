@@ -1,21 +1,15 @@
-name: Build PHP-FPM Image
+name: Build PHP-FPM Image (Optimized)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -26,8 +20,17 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Build dan Push (TANPA kondisi if)
-      - name: Build and push to Docker Hub
+      # Cache Docker layers di GitHub Actions
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      # Build dengan cache optimization
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -36,11 +39,10 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:8.5
-            ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:8.5-fpm
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Success message
-        run: |
-          echo "✅ Image pushed successfully!"
-          echo "Pull with: docker pull ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:latest"
+          # Cache optimization
+          cache-from: |
+            type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:buildcache
+            type=gha
+          cache-to: |
+            type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:buildcache,mode=max
+            type=gha,mode=max
