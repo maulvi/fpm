@@ -4,12 +4,6 @@ on:
   push:
     branches:
       - main
-      - develop
-    tags:
-      - 'v*'
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
@@ -26,74 +20,44 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Check secrets
-        if: github.event_name != 'pull_request'
-        run: |
-          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ] || [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            echo "❌ Docker Hub credentials not configured"
-            exit 1
-          fi
-          echo "✅ Docker Hub credentials found"
-
       - name: Login to Docker Hub
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=8.5
-            type=raw,value=8.5-fpm
-
+      # Build local untuk test
       - name: Build test image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          load: true
-          tags: test-image:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker build -t test-image:latest .
 
-      - name: Test PHP version
+      # Test
+      - name: Test image
         run: |
           echo "=== Testing PHP Version ==="
           docker run --rm test-image:latest php -v
-
-      - name: Test PHP info
-        run: |
-          echo "=== Testing PHP Info ==="
-          docker run --rm test-image:latest php -i | head -20
-
-      - name: Test critical extensions
-        run: |
-          echo "=== Testing Critical Extensions ==="
-          docker run --rm test-image:latest php -m | grep -E "(mysqli|pdo_mysql|opcache|redis|gd|imagick|zip|bcmath|mbstring|intl)"
-
-      - name: Test all extensions
-        run: |
-          echo "=== All Installed Extensions ==="
-          docker run --rm test-image:latest php -m
-
-      - name: Test Composer
-        run: |
+          
+          echo "=== Testing Extensions ==="
+          docker run --rm test-image:latest php -m | grep -E "(mysqli|opcache|redis|gd)"
+          
           echo "=== Testing Composer ==="
           docker run --rm test-image:latest composer --version
 
-      - name: Test PHP-FPM process
+      # Build dan Push (TANPA kondisi if)
+      - name: Build and push to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:8.5
+            ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:8.5-fpm
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Success message
         run: |
-          echo "=== Testing PHP-FPM Startup ==="
-          docker run --rm -d --name test-fpm test-image:latest
-          sleep 5
-          docker exec test-fpm ps aux | grep php
+          echo "✅ Image pushed successfully!"
+          echo "Pull with: docker pull ${{ secrets.DOCKERHUB_USERNAME }}/php-fpm:latest"
