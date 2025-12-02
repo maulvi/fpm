@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  php-fpm:
+    image: YOUR_USERNAME/php-fpm:latest
+    # Atau build locally:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    environment:
+      # PHP-FPM Settings
+      PHP_FPM_PM_CONTROL: dynamic
+      PHP_FPM_PM_MAX_CHILDREN: 100
+      PHP_FPM_PM_START_SERVERS: 15
+      PHP_FPM_PM_MIN_SPARE_SERVERS: 10
+      PHP_FPM_PM_MAX_SPARE_SERVERS: 25
+      PHP_MEMORY_LIMIT: 256M
+      
+      # OPcache Settings
+      PHP_OPCACHE_ENABLE: 1
+      PHP_OPCACHE_MEMORY_CONSUMPTION: 256
+      PHP_OPCACHE_INTERNED_STRINGS_BUFFER: 16
+      PHP_OPCACHE_MAX_ACCELERATED_FILES: 10000
+      PHP_OPCACHE_VALIDATE_TIMESTAMPS: 0
+      
+      # Redis untuk session & cache
+      PHP_SESSION_HANDLER: redis
+      PHP_SESSION_SAVE_PATH: "tcp://redis:6379"
+      
+      # Upload limits
+      PHP_UPLOAD_MAX_FILESIZE: 100M
+      PHP_POST_MAX_SIZE: 100M
+      
+    volumes:
+      - ./sites:/var/www/html
+    networks:
+      - proxy-network
+    depends_on:
+      - mariadb
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    networks:
+      - proxy-network
+    restart: unless-stopped
+
+  mariadb:
+    image: mariadb:11.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./mariadb-custom.cnf:/etc/mysql/conf.d/custom.cnf:ro
+    networks:
+      - proxy-network
+    restart: unless-stopped
+
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"
+    volumes:
+      - ./npm/data:/data
+      - ./npm/letsencrypt:/etc/letsencrypt
+      - ./nginx-tuning.conf:/data/nginx/custom/http_top.conf:ro
+    networks:
+      - proxy-network
+    restart: unless-stopped
+
+networks:
+  proxy-network:
+    driver: bridge
+
+volumes:
+  mariadb_data:
